@@ -48,16 +48,16 @@ void swap(int a,int b){
 }
 void* partition(void* param){
     struct queue_Node* args=(struct queue_Node *) param;
-    int lo=args->beg;
+    int lo=args->beg;//从参数中获得排序两端index，这里的param就是queue_Node结构体指针，这样使得scheduler一次dequeue所得无需转换放新partition线程的参数
     int hi=args->end;
-    if (hi-lo<=PARTITION_THRESH)
+    if (hi-lo<=PARTITION_THRESH)//如果长度小于1000，调用系统库快排
     {
         qsort(&data[lo],hi-lo+1,sizeof(dtype),comp);
         dbg_printf("qsort locked partition %d %d worker num: %d\n",lo,hi,worker_num);
-        pthread_mutex_lock(&lock);
+        pthread_mutex_lock(&lock);//队列操作前上锁
         dbg_printf("qsort partition entering lock %d %d worker num: %d\n",lo,hi,worker_num);
     }
-    else {
+    else {//如果长度大于1000，本轮划分完集合后将新的两段任务放到任务队列中
         int i = lo;
         int j = hi + 1;
         dtype pivot = data[lo];
@@ -70,20 +70,17 @@ void* partition(void* param){
             swap(i, j);
         }
         swap(lo, j);
-
         dbg_printf("locked partition %d %d worker num: %d\n",lo,hi,worker_num);
-        pthread_mutex_lock(&lock);
+        pthread_mutex_lock(&lock);//队列操作前上锁
         dbg_printf("partition entering lock %d %d worker num: %d\n",lo,hi,worker_num);
-        queue_enqueue(lo,j-1);
+        queue_enqueue(lo,j-1);//向队列增加新任务
         queue_enqueue(j+1,hi);
-
-
     }
      //现在划分元在j
     //sem_post(&available_worker_num);
     worker_num--;
     pthread_cond_signal(&scheduler_cond);
-    pthread_mutex_unlock(&lock);
+    pthread_mutex_unlock(&lock);//队列锁释放
     dbg_printf("partition leaving lock %d %d worker num: %d\n",lo,hi,worker_num);
     pthread_exit(NULL);
     }
@@ -129,8 +126,8 @@ void* scheduler(){
     {
         //sem_wait(&available_worker_num);
 
-        pthread_mutex_lock(&lock);
-        if(queue_isEmpty())
+        pthread_mutex_lock(&lock);//操作队列前进行互斥所
+        if(queue_isEmpty())//队列空。如果worker数量为空，停止运行；否则阻塞直到一个worker执行完
         {
 
             printf("  Queue empty\n");
@@ -149,13 +146,13 @@ void* scheduler(){
                 pthread_mutex_unlock(&lock);
             }
         }
-        else if (worker_num<WORKER_MAXNUM){
+        else if (worker_num<WORKER_MAXNUM){//如果队列非空，那么就开新worker，分配任务
 
             struct queue_Node* q_n = queue_dequeue();
             pthread_t tht;
             worker_num++;
             printf("queue_first: %d queue_last: %d worker_num: %d\n",queue_first,queue_last,worker_num);
-            while(pthread_create(&tht,NULL,partition,(void *)q_n))
+            while(pthread_create(&tht,NULL,partition,(void *)q_n))//创建worker进程
                 printf("Error: thread creation\n");
             pthread_mutex_unlock(&lock);
             pthread_detach(tht);
@@ -168,14 +165,12 @@ void* scheduler(){
 //                sem_post(&available_worker_num);
 //            }
         }
-        else{//队列非空，线程满
+        else{//队列非空，线程满。等待worker退出
             printf("  Worker full\n");
             pthread_cond_wait(&scheduler_cond,&lock);
             pthread_mutex_unlock(&lock);
         }
-
     }
-
 }
 
 __time_t ClockGetTime()
